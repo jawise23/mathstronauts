@@ -61,22 +61,16 @@ const INITIAL_LIVES: i32 = 10;
 const LIFE_BOX_SIZE: f32 = 20.0;
 const LIFE_BOX_SPACING: f32 = 5.0;
 
-// 1) A helper function to draw centered text at a given Y position
+// Helper function to draw centered text.
 fn draw_centered_text(text: &str, y: f32, font_size: u16, color: Color) {
-    // Measure how wide the text is in pixels
     let dims = measure_text(text, None, font_size, 1.0);
-    // Compute the X so that the text is centered horizontally
     let x = (screen_width() - dims.width) / 2.0;
-    // Draw the text at (x, y)
     draw_text(text, x, y, font_size as f32, color);
 }
 
-// 2) A function to draw the menu screen
+// Draws the menu screen.
 fn draw_menu() {
-    // Clear background
     clear_background(SKYBLUE);
-
-    // Draw each line of menu text, centered horizontally
     draw_centered_text("Math Game", screen_height() / 2.0 - 150.0, 60, BLACK);
     draw_centered_text(
         "Select Difficulty Level:",
@@ -98,15 +92,16 @@ fn draw_menu() {
     );
 }
 
-// Configure the game settings.
+// Configure the game window.
 fn conf() -> Conf {
     Conf {
         window_title: "Math Game".to_owned(),
-        window_width: 1024, // Set your desired window width here.
-        window_height: 768, // Set your desired window height here.
+        window_width: 1024,
+        window_height: 768,
         ..Default::default()
     }
 }
+
 // Create a fresh player starting at x = ALIEN_WALL, on the ground.
 fn new_player() -> Player {
     Player {
@@ -122,9 +117,7 @@ fn new_player() -> Player {
 
 /// Generates a new math question and four multiple-choice answers.
 /// The difficulty increases with score: operands are chosen from 1 to max_number,
-/// where max_number = 10 + (score/500)*10. (For example, if score is 0, max_number=10;
-/// if score is 500, max_number=20; if score is 1000, max_number=30, etc.)
-/// All numbers are generated from 1 (0 is excluded).
+/// where max_number = 10 + (score/500)*10.
 fn generate_question(score: i32) -> (String, Vec<MultipleChoice>) {
     let mut rng = ext_rand::thread_rng();
     let max_number = 10 + (score / 500) * 10;
@@ -141,7 +134,7 @@ fn generate_question(score: i32) -> (String, Vec<MultipleChoice>) {
         text: correct_answer.to_string(),
         is_correct: true,
     });
-    // Three wrong answers (generated from 1 to max_number*2, 0 excluded).
+    // Three wrong answers.
     for _ in 0..3 {
         let mut wrong = rng.gen_range(1..(max_number * 2));
         while wrong == correct_answer {
@@ -154,26 +147,21 @@ fn generate_question(score: i32) -> (String, Vec<MultipleChoice>) {
             is_correct: false,
         });
     }
-    // Shuffle answers.
     answers.shuffle(&mut rng);
-
-    // Evenly space them across a horizontal margin.
-    // For example, if you want a 100-pixel margin on each side:
+    // Evenly space the answer boxes across a horizontal margin.
     let margin = 100.0;
     let available_width = screen_width() - 2.0 * margin;
     let num_choices = answers.len() as f32;
     let slot_width = available_width / num_choices;
-    // Each answer box has a fixed width of 100, so center each box in its slot.
     for (i, ans) in answers.iter_mut().enumerate() {
-        ans.x = margin + slot_width * (i as f32 + 0.5) - 50.0; // 50 = 100/2
+        ans.x = margin + slot_width * (i as f32 + 0.5) - 50.0; // 50 = half the answer box width (100/2)
         ans.y = 200.0;
     }
     (question_str, answers)
 }
 
 /// Updates the alien's speed based on the current score.
-/// Base speed is 50 pixels/second.
-/// For score < 500, speed remains 50. For score ≥ 500, speed increases by 25 for every additional 1000 points.
+/// Base speed is 50 pixels/second; for score ≥ 500, speed increases by 25 for every additional 1000 points.
 fn update_alien_speed(alien: &mut Alien, score: i32) {
     let base_speed = 50.0;
     if score < 500 {
@@ -186,18 +174,12 @@ fn update_alien_speed(alien: &mut Alien, score: i32) {
 
 #[macroquad::main(conf)]
 async fn main() {
-    // Start in Menu state.
     let mut game_state = GameState::Menu;
-    // This variable will hold the starting score based on difficulty.
     let mut score = 0;
-    // Lives.
     let mut lives = INITIAL_LIVES;
-    // Variables for the question and choices.
     let mut question = String::new();
     let mut choices: Vec<MultipleChoice> = Vec::new();
-    // Create the player.
     let mut player = new_player();
-    // Create the alien.
     let mut alien = Alien {
         x: 0.0,
         y: 0.0,
@@ -206,16 +188,21 @@ async fn main() {
         speed: 50.0,
     };
 
+    // Load the astronaut sprite.
+    let astronaut_texture = load_texture("assets/mathnaut.png").await.unwrap();
+    astronaut_texture.set_filter(FilterMode::Nearest);
+
+    // Load the flame sprite.
+    let flame_texture = load_texture("assets/flame.png").await.unwrap();
+    flame_texture.set_filter(FilterMode::Nearest);
+
     loop {
         match game_state {
             GameState::Menu => {
                 draw_menu();
-
-                // Check for key presses (0, 1, 2, 3).
                 if is_key_pressed(KeyCode::Key0) {
-                    score = 0; // Base difficulty.
+                    score = 0;
                     game_state = GameState::Playing;
-                    // Reset lives and player.
                     lives = INITIAL_LIVES;
                     player = new_player();
                     alien.y = 0.0;
@@ -223,7 +210,7 @@ async fn main() {
                     question = q;
                     choices = c;
                 } else if is_key_pressed(KeyCode::Key1) {
-                    score = 500; // As if achieved 500 points.
+                    score = 500;
                     game_state = GameState::Playing;
                     lives = INITIAL_LIVES;
                     player = new_player();
@@ -232,7 +219,7 @@ async fn main() {
                     question = q;
                     choices = c;
                 } else if is_key_pressed(KeyCode::Key2) {
-                    score = 1000; // As if achieved 1000 points.
+                    score = 1000;
                     game_state = GameState::Playing;
                     lives = INITIAL_LIVES;
                     player = new_player();
@@ -241,7 +228,7 @@ async fn main() {
                     question = q;
                     choices = c;
                 } else if is_key_pressed(KeyCode::Key3) {
-                    score = 1500; // As if achieved 1500 points.
+                    score = 1500;
                     game_state = GameState::Playing;
                     lives = INITIAL_LIVES;
                     player = new_player();
@@ -252,14 +239,10 @@ async fn main() {
                 }
             }
             GameState::Playing => {
-                // Update player movement.
                 update_player(&mut player);
-
-                // Update alien speed and vertical position.
                 update_alien_speed(&mut alien, score);
                 alien.y += alien.speed * get_frame_time();
                 if alien.y + alien.height >= GROUND_Y {
-                    // Alien reached the ground: lose a life.
                     lives -= 1;
                     if lives <= 0 {
                         game_state = GameState::GameOver;
@@ -271,8 +254,6 @@ async fn main() {
                         choices = c;
                     }
                 }
-
-                // Check collisions with answer boxes (only if player is in Normal state).
                 if player.state == PlayerState::Normal {
                     let mut collided = false;
                     let mut correct_collision = false;
@@ -307,7 +288,16 @@ async fn main() {
                         }
                     }
                 }
-                render_scene(&question, &choices, &player, score, &alien, lives);
+                render_scene(
+                    &question,
+                    &choices,
+                    &player,
+                    score,
+                    &alien,
+                    lives,
+                    &astronaut_texture,
+                    &flame_texture,
+                );
             }
             GameState::Pause(ref mut time_left) => {
                 *time_left -= get_frame_time();
@@ -319,7 +309,16 @@ async fn main() {
                     choices = c;
                     game_state = GameState::Playing;
                 }
-                render_scene(&question, &choices, &player, score, &alien, lives);
+                render_scene(
+                    &question,
+                    &choices,
+                    &player,
+                    score,
+                    &alien,
+                    lives,
+                    &astronaut_texture,
+                    &flame_texture,
+                );
             }
             GameState::GameOver => {
                 clear_background(SKYBLUE);
@@ -408,6 +407,8 @@ fn render_scene(
     score: i32,
     alien: &Alien,
     lives: i32,
+    astronaut_texture: &Texture2D,
+    flame_texture: &Texture2D,
 ) {
     clear_background(SKYBLUE);
     // Draw the ground.
@@ -432,8 +433,61 @@ fn render_scene(
         let text_y = choice.y + 45.0;
         draw_text(&choice.text, text_x, text_y, 30.0, BLACK);
     }
-    // Draw the player's rocket.
-    draw_rectangle(player.x, player.y, player.width, player.height, RED);
+    // If the up arrow is pressed, draw the flame behind the astronaut.
+    if is_key_down(KeyCode::Up) {
+        let flicker_scale: f32 = 0.8 + ext_rand::random::<f32>() * 0.5;
+        let flame_width = flame_texture.width() * flicker_scale;
+        let flame_height = flame_texture.height() * flicker_scale;
+
+        // Determine facing: assume when player.vx <= 0, astronaut faces right.
+        let facing_right = player.vx <= 0.0;
+
+        // Use separate offsets for each facing.
+        let (offset_x, offset_y) = if facing_right {
+            // For facing right, flame appears on the right side.
+            (40.0 * flicker_scale, 40.0)
+        } else {
+            // For facing left, flame appears on the left side.
+            (player.width - 40.0 * flicker_scale, 35.0)
+        };
+
+        let backpack_offset_x = if facing_right {
+            player.x + offset_x
+        } else {
+            player.x + offset_x
+        };
+        let backpack_offset_y = player.y + (player.height / 2.0) - (flame_height / 2.0) + offset_y;
+
+        draw_texture_ex(
+            flame_texture,
+            backpack_offset_x,
+            backpack_offset_y,
+            WHITE,
+            DrawTextureParams {
+                dest_size: Some(Vec2::new(flame_width, flame_height)),
+                rotation: 0.0,
+                flip_x: player.vx < 0.0, // Flip the flame when moving left
+                flip_y: true,            // Still flip vertically so it points downward
+                pivot: None,
+                source: None,
+            },
+        );
+    }
+    // Draw the astronaut sprite, mirroring it if moving right.
+    draw_texture_ex(
+        astronaut_texture,
+        player.x,
+        player.y,
+        WHITE,
+        DrawTextureParams {
+            dest_size: None,
+            source: None,
+            rotation: 0.0,
+            flip_x: player.vx > 0.0,
+            flip_y: false,
+            pivot: None,
+        },
+    );
     // Draw the alien.
     draw_rectangle(alien.x, alien.y, alien.width, alien.height, GREEN);
     // Draw lives as small red boxes inside the ground (bottom-left).

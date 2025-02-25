@@ -19,6 +19,15 @@ enum PlayerState {
     Fail,
 }
 
+// New enum for math operations.
+#[derive(Clone, Copy, Debug)]
+enum Operation {
+    Addition,
+    Subtraction,
+    Multiplication,
+    Division,
+}
+
 struct MultipleChoice {
     x: f32,
     y: f32,
@@ -51,9 +60,9 @@ const GRAVITY: f32 = 0.2;
 const GROUND_Y: f32 = 600.0; // New top edge of the ground area.
 const GROUND_HEIGHT: f32 = 150.0; // New ground height.
 
-// Alien wall: The alien is drawn at x=0 with width=40. We add a 10-pixel buffer.
+// Alien wall: The alien is drawn at x=0 with width=60. We add a 10-pixel buffer.
 const ALIEN_WALL_BUFFER: f32 = 10.0;
-const ALIEN_WIDTH: f32 = 60.0; // updated width to match mathnaut
+const ALIEN_WIDTH: f32 = 60.0;
 const ALIEN_WALL: f32 = ALIEN_WIDTH + ALIEN_WALL_BUFFER; // 70
 
 // Lives: starting number and life-box dimensions.
@@ -69,7 +78,7 @@ fn draw_centered_text(text: &str, y: f32, font_size: u16, color: Color) {
 }
 
 // Draws the menu screen.
-fn draw_menu() {
+fn draw_menu(selected_op: Operation) {
     clear_background(SKYBLUE);
     draw_centered_text("Math Game", screen_height() / 2.0 - 150.0, 60, BLACK);
     draw_centered_text(
@@ -90,6 +99,23 @@ fn draw_menu() {
         30,
         DARKGRAY,
     );
+
+    // Display the currently selected operation.
+    let op_text = match selected_op {
+        Operation::Addition => {
+            "Operation: Addition (Press S for Subtraction, M for Multiplication, D for Division)"
+        }
+        Operation::Subtraction => {
+            "Operation: Subtraction (Press A for Addition, M for Multiplication, D for Division)"
+        }
+        Operation::Multiplication => {
+            "Operation: Multiplication (Press A for Addition, S for Subtraction, D for Division)"
+        }
+        Operation::Division => {
+            "Operation: Division (Press A for Addition, S for Subtraction, M for Multiplication)"
+        }
+    };
+    draw_centered_text(op_text, screen_height() / 2.0 + 100.0, 25, DARKGRAY);
 }
 
 // Configure the game window.
@@ -116,23 +142,49 @@ fn new_player() -> Player {
 }
 
 /// Generates a new math question and four multiple-choice answers.
-fn generate_question(score: i32) -> (String, Vec<MultipleChoice>) {
+/// The behavior now depends on the chosen operation.
+fn generate_question(score: i32, op: Operation) -> (String, Vec<MultipleChoice>) {
     let mut rng = ext_rand::thread_rng();
     let max_number = 10 + (score / 500) * 10;
-    let num1 = rng.gen_range(1..=max_number);
-    let num2 = rng.gen_range(1..=max_number);
-    let correct_answer = num1 + num2;
-    let question_str = format!("{} + {} = ?", num1, num2);
+
+    let (question_str, correct_answer) = match op {
+        Operation::Addition => {
+            let num1 = rng.gen_range(1..=max_number);
+            let num2 = rng.gen_range(1..=max_number);
+            (format!("{} + {} = ?", num1, num2), num1 + num2)
+        }
+        Operation::Subtraction => {
+            let num1 = rng.gen_range(1..=max_number);
+            let num2 = rng.gen_range(1..=max_number);
+            let (a, b) = if num1 >= num2 {
+                (num1, num2)
+            } else {
+                (num2, num1)
+            };
+            (format!("{} - {} = ?", a, b), a - b)
+        }
+        Operation::Multiplication => {
+            let num1 = rng.gen_range(1..=max_number);
+            let num2 = rng.gen_range(1..=max_number);
+            (format!("{} × {} = ?", num1, num2), num1 * num2)
+        }
+        Operation::Division => {
+            let divisor = rng.gen_range(1..=max_number);
+            let quotient = rng.gen_range(1..=max_number);
+            let dividend = divisor * quotient;
+            (format!("{} ÷ {} = ?", dividend, divisor), quotient)
+        }
+    };
 
     let mut answers: Vec<MultipleChoice> = Vec::new();
-    // Correct answer.
+    // Add the correct answer.
     answers.push(MultipleChoice {
         x: 0.0,
         y: 0.0,
         text: correct_answer.to_string(),
         is_correct: true,
     });
-    // Three wrong answers.
+    // Generate three wrong answers.
     for _ in 0..3 {
         let mut wrong = rng.gen_range(1..(max_number * 2));
         while wrong == correct_answer {
@@ -146,6 +198,7 @@ fn generate_question(score: i32) -> (String, Vec<MultipleChoice>) {
         });
     }
     answers.shuffle(&mut rng);
+
     // Evenly space the answer boxes across a horizontal margin.
     let margin = 100.0;
     let available_width = screen_width() - 2.0 * margin;
@@ -155,6 +208,8 @@ fn generate_question(score: i32) -> (String, Vec<MultipleChoice>) {
         ans.x = margin + slot_width * (i as f32 + 0.5) - 40.0;
         ans.y = 200.0;
     }
+
+    // Return the generated question and answers.
     (question_str, answers)
 }
 
@@ -180,10 +235,13 @@ async fn main() {
     let mut alien = Alien {
         x: 0.0,
         y: 0.0,
-        width: 200.0,  // same width as mathnaut
-        height: 200.0, // same height as mathnaut
+        width: 200.0,  // same as mathnaut
+        height: 200.0, // same as mathnaut
         speed: 50.0,
     };
+
+    // Default operation set to Addition.
+    let mut selected_op = Operation::Addition;
 
     // Load textures.
     let astronaut_texture = load_texture("assets/mathnaut.png").await.unwrap();
@@ -200,16 +258,31 @@ async fn main() {
     alien_texture.set_filter(FilterMode::Nearest);
 
     loop {
+        // In the menu state, let the user change the operation type.
+        if let GameState::Menu = game_state {
+            // Change operation based on key press.
+            if is_key_pressed(KeyCode::A) {
+                selected_op = Operation::Addition;
+            } else if is_key_pressed(KeyCode::S) {
+                selected_op = Operation::Subtraction;
+            } else if is_key_pressed(KeyCode::M) {
+                selected_op = Operation::Multiplication;
+            } else if is_key_pressed(KeyCode::D) {
+                selected_op = Operation::Division;
+            }
+        }
+
         match game_state {
             GameState::Menu => {
-                draw_menu();
+                draw_menu(selected_op);
+                // Difficulty selection keys start the game.
                 if is_key_pressed(KeyCode::Key0) {
                     score = 0;
                     game_state = GameState::Playing;
                     lives = INITIAL_LIVES;
                     player = new_player();
                     alien.y = 0.0;
-                    let (q, c) = generate_question(score);
+                    let (q, c) = generate_question(score, selected_op);
                     question = q;
                     choices = c;
                 } else if is_key_pressed(KeyCode::Key1) {
@@ -218,7 +291,7 @@ async fn main() {
                     lives = INITIAL_LIVES;
                     player = new_player();
                     alien.y = 0.0;
-                    let (q, c) = generate_question(score);
+                    let (q, c) = generate_question(score, selected_op);
                     question = q;
                     choices = c;
                 } else if is_key_pressed(KeyCode::Key2) {
@@ -227,7 +300,7 @@ async fn main() {
                     lives = INITIAL_LIVES;
                     player = new_player();
                     alien.y = 0.0;
-                    let (q, c) = generate_question(score);
+                    let (q, c) = generate_question(score, selected_op);
                     question = q;
                     choices = c;
                 } else if is_key_pressed(KeyCode::Key3) {
@@ -236,7 +309,7 @@ async fn main() {
                     lives = INITIAL_LIVES;
                     player = new_player();
                     alien.y = 0.0;
-                    let (q, c) = generate_question(score);
+                    let (q, c) = generate_question(score, selected_op);
                     question = q;
                     choices = c;
                 }
@@ -252,7 +325,7 @@ async fn main() {
                     } else {
                         alien.y = 0.0;
                         player = new_player();
-                        let (q, c) = generate_question(score);
+                        let (q, c) = generate_question(score, selected_op);
                         question = q;
                         choices = c;
                     }
@@ -309,7 +382,7 @@ async fn main() {
                 if *time_left <= 0.0 {
                     player = new_player();
                     alien.y = 0.0;
-                    let (q, c) = generate_question(score);
+                    let (q, c) = generate_question(score, selected_op);
                     question = q;
                     choices = c;
                     game_state = GameState::Playing;
@@ -428,8 +501,8 @@ fn render_scene(
         GROUND_HEIGHT,
         BROWN,
     );
-    // Draw the question.
-    draw_text(question, 300.0, 100.0, 50.0, BLACK);
+    // Draw the question (centered).
+    draw_centered_text(question, 100.0, 50, BLACK);
     // Draw the score at top-right.
     let score_str = format!("Score: {}", score);
     let score_dimensions = measure_text(&score_str, None, 40, 1.0);
@@ -449,9 +522,9 @@ fn render_scene(
             },
         );
         // Draw the answer text on top of the shuttle sprite.
-        let text_x = choice.x + 15.0;
-        let text_y = choice.y + 45.0;
-        draw_text(&choice.text, text_x, text_y, 30.0, BLACK);
+        let text_x = choice.x + 75.0;
+        let text_y = choice.y - 15.0;
+        draw_text(&choice.text, text_x, text_y, 50.0, BLACK);
     }
     // If the up arrow is pressed, draw the flame behind the astronaut.
     if is_key_down(KeyCode::Up) {
@@ -500,7 +573,7 @@ fn render_scene(
             pivot: None,
         },
     );
-    // Draw the alien sprite, now at the same size as the mathnaut.
+    // Draw the alien sprite.
     draw_texture_ex(
         alien_texture,
         alien.x,

@@ -23,9 +23,9 @@ enum PlayerState {
 #[derive(Clone, Copy, Debug)]
 enum Operation {
     Addition,
-    Subtraction,
     Multiplication,
     Division,
+    Mixed,
 }
 
 struct MultipleChoice {
@@ -103,19 +103,15 @@ fn draw_menu(selected_op: Operation) {
     // Display the currently selected operation.
     let op_text = match selected_op {
         Operation::Addition => {
-            "Operation: Addition (Press S for Subtraction, M for Multiplication, D for Division)"
-        }
-        Operation::Subtraction => {
-            "Operation: Subtraction (Press A for Addition, M for Multiplication, D for Division)"
+            "Operation: Addition (Press M for Multiplication, D for Division, X for Mixed)"
         }
         Operation::Multiplication => {
-            "Operation: Multiplication (Press A for Addition, S for Subtraction, D for Division)"
+            "Operation: Multiplication (Press A for Addition, D for Division, X for Mixed)"
         }
-        Operation::Division => {
-            "Operation: Division (Press A for Addition, S for Subtraction, M for Multiplication)"
-        }
+        Operation::Division => "Operation: Division (Press A or M to change, X for Mixed)",
+        Operation::Mixed => "Operation: Mixed (Press A, M, or D for single ops)",
     };
-    draw_centered_text(op_text, screen_height() / 2.0 + 100.0, 25, DARKGRAY);
+    draw_centered_text(op_text, screen_height() / 2.0 + 100.0, 30, DARKGRAY);
 }
 
 // Configure the game window.
@@ -145,50 +141,71 @@ fn new_player() -> Player {
 /// The behavior now depends on the chosen operation.
 fn generate_question(score: i32, op: Operation) -> (String, Vec<MultipleChoice>) {
     let mut rng = ext_rand::thread_rng();
-    let max_number = 10 + (score / 500) * 10;
 
-    let (question_str, correct_answer) = match op {
+    // 1. If we are in Mixed mode, randomly pick one of the other ops
+    let actual_op = match op {
+        Operation::Mixed => {
+            let ops = [
+                Operation::Addition,
+                Operation::Multiplication,
+                Operation::Division,
+            ];
+            *ops.choose(&mut rng).unwrap()
+        }
+        _ => op,
+    };
+
+    // 2. Decide the difficulty ramp differently per operation.
+    //    For example, Addition gets bigger faster; Multiplication & Division ramp slowly.
+    let addition_max = 10 + (score / 500) * 10; // e.g. starts at ~10, steps by 10
+    let multiply_base = 5 + (score / 500) * 5; // starts at ~5, steps by 5
+    let multiply_max = multiply_base.min(15); // clamp to 15 so it never gets too big
+    let division_max = multiply_max; // same logic for Division
+
+    // 3. Generate the actual question and correct answer
+    let (question_str, correct_answer) = match actual_op {
         Operation::Addition => {
-            let num1 = rng.gen_range(1..=max_number);
-            let num2 = rng.gen_range(1..=max_number);
+            let num1 = rng.gen_range(1..=addition_max);
+            let num2 = rng.gen_range(1..=addition_max);
             (format!("{} + {} = ?", num1, num2), num1 + num2)
         }
-        Operation::Subtraction => {
-            let num1 = rng.gen_range(1..=max_number);
-            let num2 = rng.gen_range(1..=max_number);
-            let (a, b) = if num1 >= num2 {
-                (num1, num2)
-            } else {
-                (num2, num1)
-            };
-            (format!("{} - {} = ?", a, b), a - b)
-        }
         Operation::Multiplication => {
-            let num1 = rng.gen_range(1..=max_number);
-            let num2 = rng.gen_range(1..=max_number);
+            let num1 = rng.gen_range(1..=multiply_max);
+            let num2 = rng.gen_range(1..=multiply_max);
             (format!("{} × {} = ?", num1, num2), num1 * num2)
         }
         Operation::Division => {
-            let divisor = rng.gen_range(1..=max_number);
-            let quotient = rng.gen_range(1..=max_number);
+            let divisor = rng.gen_range(1..=division_max);
+            let quotient = rng.gen_range(1..=division_max);
             let dividend = divisor * quotient;
             (format!("{} ÷ {} = ?", dividend, divisor), quotient)
         }
+        Operation::Mixed => unreachable!("Already handled Mixed above."),
     };
 
+    // Decide the upper bound for the *wrong* answers (distractors).
+    // We can reuse the same ramp factor as the correct answers, but allow up to 2× that for variety.
+    let ramp_max = match actual_op {
+        Operation::Addition => addition_max,
+        Operation::Multiplication => multiply_max,
+        Operation::Division => division_max,
+        Operation::Mixed => 1, // unreachable, but needed for completeness
+    };
+
+    // 4. Prepare the multiple choices (1 correct + 3 wrong)
     let mut answers: Vec<MultipleChoice> = Vec::new();
-    // Add the correct answer.
+    // Correct
     answers.push(MultipleChoice {
         x: 0.0,
         y: 0.0,
         text: correct_answer.to_string(),
         is_correct: true,
     });
-    // Generate three wrong answers.
+    // Wrong
     for _ in 0..3 {
-        let mut wrong = rng.gen_range(1..(max_number * 2));
+        let mut wrong = rng.gen_range(1..=(ramp_max * 2));
         while wrong == correct_answer {
-            wrong = rng.gen_range(1..(max_number * 2));
+            wrong = rng.gen_range(1..=(ramp_max * 2));
         }
         answers.push(MultipleChoice {
             x: 0.0,
@@ -197,9 +214,11 @@ fn generate_question(score: i32, op: Operation) -> (String, Vec<MultipleChoice>)
             is_correct: false,
         });
     }
+
+    // Shuffle so the correct answer isn't always first
     answers.shuffle(&mut rng);
 
-    // Evenly space the answer boxes across a horizontal margin.
+    // 5. Position the answer boxes across the screen
     let margin = 100.0;
     let available_width = screen_width() - 2.0 * margin;
     let num_choices = answers.len() as f32;
@@ -209,7 +228,7 @@ fn generate_question(score: i32, op: Operation) -> (String, Vec<MultipleChoice>)
         ans.y = 200.0;
     }
 
-    // Return the generated question and answers.
+    // 6. Return the question string & choices
     (question_str, answers)
 }
 
@@ -263,12 +282,12 @@ async fn main() {
             // Change operation based on key press.
             if is_key_pressed(KeyCode::A) {
                 selected_op = Operation::Addition;
-            } else if is_key_pressed(KeyCode::S) {
-                selected_op = Operation::Subtraction;
             } else if is_key_pressed(KeyCode::M) {
                 selected_op = Operation::Multiplication;
             } else if is_key_pressed(KeyCode::D) {
                 selected_op = Operation::Division;
+            } else if is_key_pressed(KeyCode::X) {
+                selected_op = Operation::Mixed;
             }
         }
 

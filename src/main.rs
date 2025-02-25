@@ -48,8 +48,8 @@ struct Alien {
 const MOVE_SPEED: f32 = 3.0;
 const BOOST: f32 = 0.3;
 const GRAVITY: f32 = 0.2;
-const GROUND_Y: f32 = 650.0; // New top edge of the ground area.
-const GROUND_HEIGHT: f32 = 100.0; // New ground height.
+const GROUND_Y: f32 = 600.0; // New top edge of the ground area.
+const GROUND_HEIGHT: f32 = 150.0; // New ground height.
 
 // Alien wall: The alien is drawn at x=0 with width=40. We add a 10-pixel buffer.
 const ALIEN_WALL_BUFFER: f32 = 10.0;
@@ -106,11 +106,11 @@ fn conf() -> Conf {
 fn new_player() -> Player {
     Player {
         x: ALIEN_WALL,
-        y: GROUND_Y,
+        y: GROUND_Y - 50.0,
         vx: 0.0,
         vy: 0.0,
-        width: 30.0,
-        height: 30.0,
+        width: 60.0,
+        height: 60.0,
         state: PlayerState::Normal,
     }
 }
@@ -154,7 +154,7 @@ fn generate_question(score: i32) -> (String, Vec<MultipleChoice>) {
     let num_choices = answers.len() as f32;
     let slot_width = available_width / num_choices;
     for (i, ans) in answers.iter_mut().enumerate() {
-        ans.x = margin + slot_width * (i as f32 + 0.5) - 50.0; // 50 = half the answer box width (100/2)
+        ans.x = margin + slot_width * (i as f32 + 0.5) - 40.0; // 50 = half the answer box width (100/2)
         ans.y = 200.0;
     }
     (question_str, answers)
@@ -195,6 +195,9 @@ async fn main() {
     // Load the flame sprite.
     let flame_texture = load_texture("assets/flame.png").await.unwrap();
     flame_texture.set_filter(FilterMode::Nearest);
+
+    let shuttle_texture = load_texture("assets/shuttle.png").await.unwrap();
+    shuttle_texture.set_filter(FilterMode::Nearest);
 
     loop {
         match game_state {
@@ -297,6 +300,7 @@ async fn main() {
                     lives,
                     &astronaut_texture,
                     &flame_texture,
+                    &shuttle_texture,
                 );
             }
             GameState::Pause(ref mut time_left) => {
@@ -318,6 +322,7 @@ async fn main() {
                     lives,
                     &astronaut_texture,
                     &flame_texture,
+                    &shuttle_texture,
                 );
             }
             GameState::GameOver => {
@@ -409,6 +414,7 @@ fn render_scene(
     lives: i32,
     astronaut_texture: &Texture2D,
     flame_texture: &Texture2D,
+    shuttle_texture: &Texture2D,
 ) {
     clear_background(SKYBLUE);
     // Draw the ground.
@@ -428,7 +434,18 @@ fn render_scene(
     draw_text(&score_str, x_score, 50.0, 40.0, BLACK);
     // Draw the answer boxes.
     for choice in choices {
-        draw_rectangle(choice.x, choice.y, 100.0, 80.0, GRAY);
+        // Draw the shuttle sprite as the background for the answer box.
+        draw_texture_ex(
+            shuttle_texture,
+            choice.x - 10.0,
+            choice.y,
+            WHITE,
+            DrawTextureParams {
+                dest_size: Some(Vec2::new(200.0, 200.0)), // Set the size to match the answer box
+                ..Default::default()
+            },
+        );
+        // Draw the answer text on top of the shuttle sprite.
         let text_x = choice.x + 15.0;
         let text_y = choice.y + 45.0;
         draw_text(&choice.text, text_x, text_y, 30.0, BLACK);

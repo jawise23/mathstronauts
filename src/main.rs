@@ -53,8 +53,8 @@ const GROUND_HEIGHT: f32 = 150.0; // New ground height.
 
 // Alien wall: The alien is drawn at x=0 with width=40. We add a 10-pixel buffer.
 const ALIEN_WALL_BUFFER: f32 = 10.0;
-const ALIEN_WIDTH: f32 = 40.0;
-const ALIEN_WALL: f32 = ALIEN_WIDTH + ALIEN_WALL_BUFFER; // 50
+const ALIEN_WIDTH: f32 = 60.0; // updated width to match mathnaut
+const ALIEN_WALL: f32 = ALIEN_WIDTH + ALIEN_WALL_BUFFER; // 70
 
 // Lives: starting number and life-box dimensions.
 const INITIAL_LIVES: i32 = 10;
@@ -116,8 +116,6 @@ fn new_player() -> Player {
 }
 
 /// Generates a new math question and four multiple-choice answers.
-/// The difficulty increases with score: operands are chosen from 1 to max_number,
-/// where max_number = 10 + (score/500)*10.
 fn generate_question(score: i32) -> (String, Vec<MultipleChoice>) {
     let mut rng = ext_rand::thread_rng();
     let max_number = 10 + (score / 500) * 10;
@@ -154,14 +152,13 @@ fn generate_question(score: i32) -> (String, Vec<MultipleChoice>) {
     let num_choices = answers.len() as f32;
     let slot_width = available_width / num_choices;
     for (i, ans) in answers.iter_mut().enumerate() {
-        ans.x = margin + slot_width * (i as f32 + 0.5) - 40.0; // 50 = half the answer box width (100/2)
+        ans.x = margin + slot_width * (i as f32 + 0.5) - 40.0;
         ans.y = 200.0;
     }
     (question_str, answers)
 }
 
 /// Updates the alien's speed based on the current score.
-/// Base speed is 50 pixels/second; for score ≥ 500, speed increases by 25 for every additional 1000 points.
 fn update_alien_speed(alien: &mut Alien, score: i32) {
     let base_speed = 50.0;
     if score < 500 {
@@ -183,21 +180,24 @@ async fn main() {
     let mut alien = Alien {
         x: 0.0,
         y: 0.0,
-        width: ALIEN_WIDTH,
-        height: 40.0,
+        width: 200.0,  // same width as mathnaut
+        height: 200.0, // same height as mathnaut
         speed: 50.0,
     };
 
-    // Load the astronaut sprite.
+    // Load textures.
     let astronaut_texture = load_texture("assets/mathnaut.png").await.unwrap();
     astronaut_texture.set_filter(FilterMode::Nearest);
 
-    // Load the flame sprite.
     let flame_texture = load_texture("assets/flame.png").await.unwrap();
     flame_texture.set_filter(FilterMode::Nearest);
 
     let shuttle_texture = load_texture("assets/shuttle.png").await.unwrap();
     shuttle_texture.set_filter(FilterMode::Nearest);
+
+    // Load the alien sprite.
+    let alien_texture = load_texture("assets/alien.png").await.unwrap();
+    alien_texture.set_filter(FilterMode::Nearest);
 
     loop {
         match game_state {
@@ -301,6 +301,7 @@ async fn main() {
                     &astronaut_texture,
                     &flame_texture,
                     &shuttle_texture,
+                    &alien_texture,
                 );
             }
             GameState::Pause(ref mut time_left) => {
@@ -323,6 +324,7 @@ async fn main() {
                     &astronaut_texture,
                     &flame_texture,
                     &shuttle_texture,
+                    &alien_texture,
                 );
             }
             GameState::GameOver => {
@@ -415,6 +417,7 @@ fn render_scene(
     astronaut_texture: &Texture2D,
     flame_texture: &Texture2D,
     shuttle_texture: &Texture2D,
+    alien_texture: &Texture2D,
 ) {
     clear_background(SKYBLUE);
     // Draw the ground.
@@ -426,7 +429,7 @@ fn render_scene(
         BROWN,
     );
     // Draw the question.
-    draw_text(question, 50.0, 100.0, 50.0, BLACK);
+    draw_text(question, 300.0, 100.0, 50.0, BLACK);
     // Draw the score at top-right.
     let score_str = format!("Score: {}", score);
     let score_dimensions = measure_text(&score_str, None, 40, 1.0);
@@ -441,7 +444,7 @@ fn render_scene(
             choice.y,
             WHITE,
             DrawTextureParams {
-                dest_size: Some(Vec2::new(200.0, 200.0)), // Set the size to match the answer box
+                dest_size: Some(Vec2::new(200.0, 200.0)),
                 ..Default::default()
             },
         );
@@ -458,21 +461,13 @@ fn render_scene(
 
         // Determine facing: assume when player.vx <= 0, astronaut faces right.
         let facing_right = player.vx <= 0.0;
-
-        // Use separate offsets for each facing.
         let (offset_x, offset_y) = if facing_right {
-            // For facing right, flame appears on the right side.
             (40.0 * flicker_scale, 40.0)
         } else {
-            // For facing left, flame appears on the left side.
             (player.width - 40.0 * flicker_scale, 35.0)
         };
 
-        let backpack_offset_x = if facing_right {
-            player.x + offset_x
-        } else {
-            player.x + offset_x
-        };
+        let backpack_offset_x = player.x + offset_x;
         let backpack_offset_y = player.y + (player.height / 2.0) - (flame_height / 2.0) + offset_y;
 
         draw_texture_ex(
@@ -483,14 +478,14 @@ fn render_scene(
             DrawTextureParams {
                 dest_size: Some(Vec2::new(flame_width, flame_height)),
                 rotation: 0.0,
-                flip_x: player.vx < 0.0, // Flip the flame when moving left
-                flip_y: true,            // Still flip vertically so it points downward
+                flip_x: player.vx < 0.0,
+                flip_y: true,
                 pivot: None,
                 source: None,
             },
         );
     }
-    // Draw the astronaut sprite, mirroring it if moving right.
+    // Draw the astronaut sprite.
     draw_texture_ex(
         astronaut_texture,
         player.x,
@@ -505,8 +500,17 @@ fn render_scene(
             pivot: None,
         },
     );
-    // Draw the alien.
-    draw_rectangle(alien.x, alien.y, alien.width, alien.height, GREEN);
+    // Draw the alien sprite, now at the same size as the mathnaut.
+    draw_texture_ex(
+        alien_texture,
+        alien.x,
+        alien.y,
+        WHITE,
+        DrawTextureParams {
+            dest_size: Some(Vec2::new(alien.width, alien.height)),
+            ..Default::default()
+        },
+    );
     // Draw lives as small red boxes inside the ground (bottom-left).
     let mut life_x = 10.0;
     let life_y = GROUND_Y + player.height + (GROUND_HEIGHT - LIFE_BOX_SIZE) / 2.0;

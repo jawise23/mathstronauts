@@ -8,8 +8,9 @@ use ext_rand::seq::SliceRandom;
 #[derive(Debug)]
 enum GameState {
     Menu,
+    NameEntry(Operation, i32), // <--- New variant to collect the player's name
     Playing,
-    Pause(f32), // Pause duration (in seconds) after a correct answer.
+    Pause(f32),
     GameOver,
 }
 
@@ -23,6 +24,7 @@ enum PlayerState {
 #[derive(Clone, Copy, Debug)]
 enum Operation {
     Addition,
+    Subtraction, // <-- NEW
     Multiplication,
     Division,
     Mixed,
@@ -103,15 +105,22 @@ fn draw_menu(selected_op: Operation) {
     // Display the currently selected operation.
     let op_text = match selected_op {
         Operation::Addition => {
-            "Operation: Addition (Press M for Multiplication, D for Division, X for Mixed)"
+            "Operation: Addition (Press S for Subtraction, M for Multiplication, D for Division, X for Mixed)"
+        }
+        Operation::Subtraction => {
+            "Operation: Subtraction (Press A for Addition, M for Multiplication, D for Division, X for Mixed)"
         }
         Operation::Multiplication => {
-            "Operation: Multiplication (Press A for Addition, D for Division, X for Mixed)"
+            "Operation: Multiplication (Press A for Addition, S for Subtraction, D for Division, X for Mixed)"
         }
-        Operation::Division => "Operation: Division (Press A or M to change, X for Mixed)",
-        Operation::Mixed => "Operation: Mixed (Press A, M, or D for single ops)",
+        Operation::Division => {
+            "Operation: Division (Press A for Addition, S for Subtraction, M for Multiplication, X for Mixed)"
+        }
+        Operation::Mixed => {
+            "Operation: Mixed (Press A, S, M, or D for single ops)"
+        }
     };
-    draw_centered_text(op_text, screen_height() / 2.0 + 100.0, 30, DARKGRAY);
+    draw_centered_text(op_text, screen_height() / 2.0 + 100.0, 24, DARKGRAY);
 }
 
 // Configure the game window.
@@ -147,6 +156,7 @@ fn generate_question(score: i32, op: Operation) -> (String, Vec<MultipleChoice>)
         Operation::Mixed => {
             let ops = [
                 Operation::Addition,
+                Operation::Subtraction,
                 Operation::Multiplication,
                 Operation::Division,
             ];
@@ -155,19 +165,29 @@ fn generate_question(score: i32, op: Operation) -> (String, Vec<MultipleChoice>)
         _ => op,
     };
 
-    // 2. Decide the difficulty ramp differently per operation.
-    //    For example, Addition gets bigger faster; Multiplication & Division ramp slowly.
-    let addition_max = 10 + (score / 500) * 10; // e.g. starts at ~10, steps by 10
-    let multiply_base = 5 + (score / 500) * 5; // starts at ~5, steps by 5
-    let multiply_max = multiply_base.min(15); // clamp to 15 so it never gets too big
-    let division_max = multiply_max; // same logic for Division
+    // 2. Decide difficulty ramp
+    let addition_max = 10 + (score / 500) * 10;
+    let multiply_base = 5 + (score / 500) * 5;
+    let multiply_max = multiply_base.min(15);
+    let division_max = multiply_max;
+    // If you want a separate ramp for subtraction, define it here,
+    // or just reuse `addition_max`.
+    let subtraction_max = addition_max;
 
-    // 3. Generate the actual question and correct answer
+    // 3. Generate question & correct answer
     let (question_str, correct_answer) = match actual_op {
         Operation::Addition => {
             let num1 = rng.gen_range(1..=addition_max);
             let num2 = rng.gen_range(1..=addition_max);
             (format!("{} + {} = ?", num1, num2), num1 + num2)
+        }
+        Operation::Subtraction => {
+            // generate two random numbers, then subtract smaller from bigger
+            let num1 = rng.gen_range(1..=subtraction_max);
+            let num2 = rng.gen_range(1..=subtraction_max);
+            let big = num1.max(num2);
+            let small = num1.min(num2);
+            (format!("{} - {} = ?", big, small), big - small)
         }
         Operation::Multiplication => {
             let num1 = rng.gen_range(1..=multiply_max);
@@ -180,13 +200,14 @@ fn generate_question(score: i32, op: Operation) -> (String, Vec<MultipleChoice>)
             let dividend = divisor * quotient;
             (format!("{} ÷ {} = ?", dividend, divisor), quotient)
         }
-        Operation::Mixed => unreachable!("Already handled Mixed above."),
+        Operation::Mixed => unreachable!("Handled above"),
     };
 
     // Decide the upper bound for the *wrong* answers (distractors).
     // We can reuse the same ramp factor as the correct answers, but allow up to 2× that for variety.
     let ramp_max = match actual_op {
         Operation::Addition => addition_max,
+        Operation::Subtraction => subtraction_max,
         Operation::Multiplication => multiply_max,
         Operation::Division => division_max,
         Operation::Mixed => 1, // unreachable, but needed for completeness
@@ -243,9 +264,32 @@ fn update_alien_speed(alien: &mut Alien, score: i32) {
     }
 }
 
+/// Collect text input from the user.
+/// Pressing Backspace removes a character.
+/// Pressing Enter must be checked outside this function (in `NameEntry`).
+fn update_name_input(player_name: &mut String) {
+    // Read next character if any:
+    if let Some(c) = get_char_pressed() {
+        // We can filter out only 'printable' ASCII if we like, or keep it simple
+        // For example, let's just allow up to 15 characters
+        if c as u32 == 8 {
+            // backspace
+            player_name.pop();
+        } else if player_name.len() < 15 {
+            player_name.push(c);
+        }
+    }
+
+    // Also handle if user presses BACKSPACE as a key (not captured by get_char_pressed)
+    if is_key_pressed(KeyCode::Backspace) {
+        player_name.pop();
+    }
+}
+
 #[macroquad::main(conf)]
 async fn main() {
     let mut game_state = GameState::Menu;
+    let mut player_name = String::new();
     let mut score = 0;
     let mut lives = INITIAL_LIVES;
     let mut question = String::new();
@@ -282,6 +326,8 @@ async fn main() {
             // Change operation based on key press.
             if is_key_pressed(KeyCode::A) {
                 selected_op = Operation::Addition;
+            } else if is_key_pressed(KeyCode::S) {
+                selected_op = Operation::Subtraction;
             } else if is_key_pressed(KeyCode::M) {
                 selected_op = Operation::Multiplication;
             } else if is_key_pressed(KeyCode::D) {
@@ -294,43 +340,67 @@ async fn main() {
         match game_state {
             GameState::Menu => {
                 draw_menu(selected_op);
-                // Difficulty selection keys start the game.
+
+                // Operation selection
+                if is_key_pressed(KeyCode::A) {
+                    selected_op = Operation::Addition;
+                } else if is_key_pressed(KeyCode::S) {
+                    selected_op = Operation::Subtraction;
+                } else if is_key_pressed(KeyCode::M) {
+                    selected_op = Operation::Multiplication;
+                } else if is_key_pressed(KeyCode::D) {
+                    selected_op = Operation::Division;
+                } else if is_key_pressed(KeyCode::X) {
+                    selected_op = Operation::Mixed;
+                }
+
+                // Difficulty selection
                 if is_key_pressed(KeyCode::Key0) {
                     score = 0;
-                    game_state = GameState::Playing;
-                    lives = INITIAL_LIVES;
-                    player = new_player();
-                    alien.y = 0.0;
-                    let (q, c) = generate_question(score, selected_op);
-                    question = q;
-                    choices = c;
+                    // Instead of going directly to Playing, go to NameEntry
+                    game_state = GameState::NameEntry(selected_op, score);
+                    player_name.clear(); // reset typed name
                 } else if is_key_pressed(KeyCode::Key1) {
                     score = 500;
-                    game_state = GameState::Playing;
-                    lives = INITIAL_LIVES;
-                    player = new_player();
-                    alien.y = 0.0;
-                    let (q, c) = generate_question(score, selected_op);
-                    question = q;
-                    choices = c;
+                    game_state = GameState::NameEntry(selected_op, score);
+                    player_name.clear();
                 } else if is_key_pressed(KeyCode::Key2) {
                     score = 1000;
-                    game_state = GameState::Playing;
-                    lives = INITIAL_LIVES;
-                    player = new_player();
-                    alien.y = 0.0;
-                    let (q, c) = generate_question(score, selected_op);
-                    question = q;
-                    choices = c;
+                    game_state = GameState::NameEntry(selected_op, score);
+                    player_name.clear();
                 } else if is_key_pressed(KeyCode::Key3) {
                     score = 1500;
-                    game_state = GameState::Playing;
+                    game_state = GameState::NameEntry(selected_op, score);
+                    player_name.clear();
+                }
+            }
+            GameState::NameEntry(op, initial_score) => {
+                // 1) Let the user type characters for their name
+                update_name_input(&mut player_name);
+
+                // 2) Draw a “Name Entry” screen
+                clear_background(SKYBLUE);
+                draw_centered_text(
+                    "Enter your name, then press [Enter]:",
+                    screen_height() / 2.0 - 100.0,
+                    40,
+                    BLACK,
+                );
+                draw_centered_text(&player_name, screen_height() / 2.0, 50, DARKGRAY);
+
+                // 3) If the user presses Enter and there's at least 1 char, move on to Playing
+                if is_key_pressed(KeyCode::Enter) && !player_name.is_empty() {
+                    // Initialize your playing conditions
                     lives = INITIAL_LIVES;
-                    player = new_player();
-                    alien.y = 0.0;
-                    let (q, c) = generate_question(score, selected_op);
+                    let (q, c) = generate_question(initial_score, op);
+                    // fill out question, choices, etc. and move to Playing
+                    score = initial_score;
                     question = q;
                     choices = c;
+                    player = new_player();
+                    alien.y = 0.0;
+
+                    game_state = GameState::Playing;
                 }
             }
             GameState::Playing => {
